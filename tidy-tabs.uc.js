@@ -1016,6 +1016,8 @@
           continue;
         }
 
+        const existingFolderElement = existingFolderElementsMap.get(topic);
+
         if (existingFolderElement && existingFolderElement.isConnected) {
           try {
             if (existingFolderElement.getAttribute("collapsed") === "true") {
