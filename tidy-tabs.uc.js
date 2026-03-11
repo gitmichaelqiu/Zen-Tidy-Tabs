@@ -968,8 +968,8 @@
         multiTabGroups.length === 0
       );
       console.log(
-        "[TabSort] Debug - tabsMatchedToExistingGroups === 0:",
-        tabsMatchedToExistingGroups === 0
+        "[TabSort] Debug - tabsMatchedToExistingFolders === 0:",
+        tabsMatchedToExistingFolders === 0
       );
       console.log(
         "[TabSort] Debug - initialTabsToSort.length > 1:",
