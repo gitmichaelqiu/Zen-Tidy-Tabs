@@ -962,7 +962,7 @@
       );
       console.log("[TabSort] Debug - Final groups:", Object.keys(finalGroups));
       console.log("[TabSort] Debug - Multi-tab groups:", multiTabGroups.length);
-      console.log("[TabSort] Debug - Tabs matched to existing groups:", tabsMatchedToExistingGroups);
+      console.log("[TabSort] Debug - Tabs matched to existing groups:", tabsMatchedToExistingFolders);
       console.log(
         "[TabSort] Debug - multiTabGroups.length === 0:",
         multiTabGroups.length === 0
@@ -1005,119 +1005,123 @@
 
       // --- Process each final, consolidated group ---
       for (const topic in finalGroups) {
-        const tabsForThisTopic = finalGroups[topic].filter((t) => {
-          if (!t || !t.isConnected) return false;
-          // Official check: is the tab already in a Zen folder?
-          if (t.group && t.group.isZenFolder) {
-            return false;
-          }
-          return true;
-        });
-
-        console.log(`[TabSort] Processing topic "${topic}" with ${tabsForThisTopic.length} tabs`);
-
-        if (tabsForThisTopic.length === 0) {
-          console.log(`[TabSort] Skipping topic "${topic}" - no valid tabs to move`);
-          continue;
-        }
-
-        const existingFolderElement = existingFolderElementsMap.get(topic);
-        console.log(`[TabSort] Existing folder for "${topic}":`, existingFolderElement ? "Found" : "Not Found");
-
-        if (existingFolderElement && existingFolderElement.isConnected) {
-          try {
-            if (existingFolderElement.getAttribute("collapsed") === "true") {
-              existingFolderElement.setAttribute("collapsed", "false");
-              const folderLabelElement =
-                existingFolderElement.querySelector(".zen-folder-label");
-              if (folderLabelElement) {
-                folderLabelElement.setAttribute("aria-expanded", "true");
-              }
+        try {
+          const tabsForThisTopic = finalGroups[topic].filter((t) => {
+            if (!t || !t.isConnected) return false;
+            // Official check: is the tab already in a Zen folder?
+            if (t.group && t.group.isZenFolder) {
+              return false;
             }
-            for (const tab of tabsForThisTopic) {
-              if (tab && tab.isConnected && (!tab.group || !tab.group.isZenFolder)) {
-                existingFolderElement.addTabs([tab]);
-              } else {
-                console.warn(
-                  ` -> Tab "${
-                    getTabTitle(tab) || "Unknown"
-                  }" skipped moving to "${topic}" (already in a folder or invalid).`
-                );
-              }
-            }
-          } catch (e) {
-            console.error(
-              `Error moving tabs to existing folder "${topic}":`,
-              e,
-              existingFolderElement
-            );
-          }
-        } else {
-          if (existingFolderElement && !existingFolderElement.isConnected) {
-            console.warn(
-              ` -> Existing folder element for "${topic}" was found in map but is no longer connected to DOM. Will create a new folder.`
-            );
+            return true;
+          });
+
+          console.log(`[TabSort] Processing topic "${topic}" with ${tabsForThisTopic.length} tabs`);
+
+          if (tabsForThisTopic.length === 0) {
+            console.log(`[TabSort] Skipping topic "${topic}" - no valid tabs to move`);
+            continue;
           }
 
-          // Create folder for any topic with tabs
-          if (tabsForThisTopic.length > 0) {
-            const firstValidTabForFolder = tabsForThisTopic[0];
-            const folderOptions = {
-              label: topic,
-              workspaceId: currentWorkspaceId,
-              insertBefore: firstValidTabForFolder,
-              renameFolder: false
-            };
+          const existingFolderElement = existingFolderElementsMap.get(topic);
+          console.log(`[TabSort] Existing folder for "${topic}":`, existingFolderElement ? "Found" : "Not Found");
+
+          if (existingFolderElement && existingFolderElement.isConnected) {
             try {
-              if (typeof window.gZenFolders !== "undefined") {
-                console.log(`[TabSort] Calling gZenFolders.createFolder for "${topic}"...`);
-                const newFolder = window.gZenFolders.createFolder(
-                  tabsForThisTopic,
-                  folderOptions
-                );
-                console.log(`[TabSort] createFolder returned:`, newFolder);
-                if (newFolder && newFolder.isConnected) {
-                  existingFolderElementsMap.set(topic, newFolder);
+              if (existingFolderElement.getAttribute("collapsed") === "true") {
+                existingFolderElement.setAttribute("collapsed", "false");
+                const folderLabelElement =
+                  existingFolderElement.querySelector(".zen-folder-label");
+                if (folderLabelElement) {
+                  folderLabelElement.setAttribute("aria-expanded", "true");
+                }
+              }
+              for (const tab of tabsForThisTopic) {
+                if (tab && tab.isConnected && (!tab.group || !tab.group.isZenFolder)) {
+                  existingFolderElement.addTabs([tab]);
                 } else {
                   console.warn(
-                    ` -> createFolder didn't return a connected element for "${topic}". Attempting fallback find.`
+                    `[TabSort] -> Tab "${
+                      getTabTitle(tab) || "Unknown"
+                    }" skipped moving to "${topic}" (already in a folder or invalid).`
                   );
-                  const newFolderElFallback = findFolderElement(
-                    topic,
-                    currentWorkspaceId
-                  );
-                  if (newFolderElFallback && newFolderElFallback.isConnected) {
-                    existingFolderElementsMap.set(topic, newFolderElFallback);
-                  } else {
-                    console.error(
-                      ` -> Failed to find the newly created folder element for "${topic}" even with fallback.`
-                    );
-                  }
                 }
-              } else {
-                console.error("gZenFolders API not available.");
               }
             } catch (e) {
               console.error(
-                `Error calling gZenFolders.createFolder for topic "${topic}":`,
-                e
+                `[TabSort] Error moving tabs to existing folder "${topic}":`,
+                e,
+                existingFolderElement
               );
-              const folderAfterError = findFolderElement(
-                topic,
-                currentWorkspaceId
+            }
+          } else {
+            if (existingFolderElement && !existingFolderElement.isConnected) {
+              console.warn(
+                `[TabSort] -> Existing folder element for "${topic}" was found in map but is no longer connected to DOM. Will create a new folder.`
               );
-              if (folderAfterError && folderAfterError.isConnected) {
-                console.warn(
-                  ` -> Folder "${topic}" might exist despite error. Found via findGroupElement.`
-                );
-                existingFolderElementsMap.set(topic, folderAfterError);
-              } else {
+            }
+
+            // Create folder for any topic with tabs
+            if (tabsForThisTopic.length > 0) {
+              const firstValidTabForFolder = tabsForThisTopic[0];
+              const folderOptions = {
+                label: topic,
+                workspaceId: currentWorkspaceId,
+                insertBefore: firstValidTabForFolder,
+                renameFolder: false
+              };
+              try {
+                if (typeof window.gZenFolders !== "undefined") {
+                  console.log(`[TabSort] Calling gZenFolders.createFolder for "${topic}" with ${tabsForThisTopic.length} tabs...`);
+                  const newFolder = window.gZenFolders.createFolder(
+                    tabsForThisTopic,
+                    folderOptions
+                  );
+                  console.log(`[TabSort] createFolder returned:`, newFolder);
+                  if (newFolder && newFolder.isConnected) {
+                    existingFolderElementsMap.set(topic, newFolder);
+                  } else {
+                    console.warn(
+                      `[TabSort] -> createFolder didn't return a connected element for "${topic}". Attempting fallback find.`
+                    );
+                    const newFolderElFallback = findFolderElement(
+                      topic,
+                      currentWorkspaceId
+                    );
+                    if (newFolderElFallback && newFolderElFallback.isConnected) {
+                      existingFolderElementsMap.set(topic, newFolderElFallback);
+                    } else {
+                      console.error(
+                        `[TabSort] -> Failed to find the newly created folder element for "${topic}" even with fallback.`
+                      );
+                    }
+                  }
+                } else {
+                  console.error("[TabSort] gZenFolders API not available.");
+                }
+              } catch (e) {
                 console.error(
-                  ` -> Failed to find folder "${topic}" after creation error.`
+                  `[TabSort] Error calling gZenFolders.createFolder for topic "${topic}":`,
+                  e
                 );
+                const folderAfterError = findFolderElement(
+                  topic,
+                  currentWorkspaceId
+                );
+                if (folderAfterError && folderAfterError.isConnected) {
+                  console.warn(
+                    `[TabSort] -> Folder "${topic}" might exist despite error. Found via findGroupElement.`
+                  );
+                  existingFolderElementsMap.set(topic, folderAfterError);
+                } else {
+                  console.error(
+                    `[TabSort] -> Failed to find folder "${topic}" after creation error.`
+                  );
+                }
               }
             }
           }
+        } catch (topicError) {
+          console.error(`[TabSort] Fatal error processing topic "${topic}":`, topicError);
         }
       } // End loop through final groups
 
