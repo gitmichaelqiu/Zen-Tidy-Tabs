@@ -1078,8 +1078,20 @@
                   );
                   console.log(`[TabSort] createFolder returned:`, newFolder);
                   if (newFolder && newFolder.isConnected) {
-                    existingFolderElementsMap.set(topic, newFolder);
-                  } else {
+                  console.log(`[TabSort] New folder "${topic}" is connected. Parent:`, newFolder.parentElement?.tagName);
+                  newFolder.setAttribute("collapsed", "false");
+                  
+                  // Verify tabs are inside
+                  const folderTabs = Array.from(newFolder.querySelectorAll('tab'));
+                  console.log(`[TabSort] Folder "${topic}" contains ${folderTabs.length} tabs via querySelector.`);
+                  
+                  if (folderTabs.length === 0 && tabsForThisTopic.length > 0) {
+                    console.warn(`[TabSort] Folder "${topic}" appears empty! Explicitly adding tabs...`);
+                    newFolder.addTabs(tabsForThisTopic);
+                  }
+                  
+                  existingFolderElementsMap.set(topic, newFolder);
+                } else {
                     console.warn(
                       `[TabSort] -> createFolder didn't return a connected element for "${topic}". Attempting fallback find.`
                     );
@@ -1162,12 +1174,15 @@
           
           console.log("[TabSort] Reorder - folders:", folders.length, "ungrouped:", ungroupedTabs.length);
           
-          // Only reorder if we have both folders AND ungrouped tabs
-          if (folders.length > 0 && ungroupedTabs.length > 0) {
-            console.log("[TabSort] Reorder - Moving ungrouped tabs below folders...");
+          // Only reorder if we have both folders AND ungrouped tabs in the SAME container
+          // Note: In v1.15b folders are usually in the pinned section, tabs in the normal section.
+          const foldersInThisContainer = folders.filter(f => f.parentElement === tabsContainer);
+          const tabsInThisContainer = ungroupedTabs.filter(t => t.parentElement === tabsContainer);
+
+          if (foldersInThisContainer.length > 0 && tabsInThisContainer.length > 0) {
+            console.log("[TabSort] Reorder - Moving ungrouped tabs below folders in tabsContainer...");
             
-            // Move each ungrouped tab to after the last folder
-            const lastFolder = folders[folders.length - 1];
+            const lastFolder = foldersInThisContainer[foldersInThisContainer.length - 1];
             let insertAfterElement = lastFolder;
             
             ungroupedTabs.forEach((tab) => {
