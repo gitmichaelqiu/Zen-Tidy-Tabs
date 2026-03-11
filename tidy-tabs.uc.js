@@ -186,17 +186,18 @@
     const sanitizedTopicName = topicName.trim();
     if (!sanitizedTopicName) return null;
 
-    const safeSelectorTopicName = sanitizedTopicName
-      .replace(/\\/g, "\\\\")
-      .replace(/"/g, '\\"');
-
     try {
-      return document.querySelector(
-        `zen-folder[label="${safeSelectorTopicName}"]:has(tab[zen-workspace-id="${workspaceId}"])`
-      );
+      // Direct query within the workspace element for efficiency
+      const workspaceElement = gZenWorkspaces?.activeWorkspaceElement;
+      if (workspaceElement) {
+        return Array.from(workspaceElement.querySelectorAll('zen-folder')).find(
+          folder => folder.getAttribute('label') === sanitizedTopicName
+        );
+      }
+      return null;
     } catch (e) {
       console.error(
-        `Error finding folder selector for "${sanitizedTopicName}":`,
+        `Error finding folder for "${sanitizedTopicName}":`,
         e
       );
       return null;
@@ -988,54 +989,51 @@
         return;
       }
 
-      // --- Get existing folder ELEMENTS ---
+      // --- Get existing folder ELEMENTS within the current workspace ---
       const existingFolderElementsMap = new Map();
-      document.querySelectorAll(folderSelector).forEach((folderEl) => {
-        const label = folderEl.getAttribute("label");
-        if (label) {
-          existingFolderElementsMap.set(label, folderEl);
-        }
-      });
+      const activeWorkspaceElement = gZenWorkspaces?.activeWorkspaceElement;
+      if (activeWorkspaceElement) {
+        activeWorkspaceElement.querySelectorAll('zen-folder').forEach((folderEl) => {
+          const label = folderEl.getAttribute("label");
+          if (label) {
+            existingFolderElementsMap.set(label, folderEl);
+          }
+        });
+      }
 
       // --- Process each final, consolidated group ---
       for (const topic in finalGroups) {
         const tabsForThisTopic = finalGroups[topic].filter((t) => {
-          const folderParent = t.closest("zen-folder");
-          const isInFolderInCorrectWorkspace = folderParent
-            ? folderParent.matches(folderSelector)
-            : false;
-          return t && t.isConnected && !isInFolderInCorrectWorkspace;
+          if (!t || !t.isConnected) return false;
+          // Official check: is the tab already in a Zen folder?
+          if (t.group && t.group.isZenFolder) {
+            return false;
+          }
+          return true;
         });
 
         if (tabsForThisTopic.length === 0) {
           continue;
         }
 
-        const existingFolderElement = existingFolderElementsMap.get(topic);
-
         if (existingFolderElement && existingFolderElement.isConnected) {
           try {
             if (existingFolderElement.getAttribute("collapsed") === "true") {
               existingFolderElement.setAttribute("collapsed", "false");
               const folderLabelElement =
-                existingFolderElement.querySelector(".zen-folder-label") || 
-                existingFolderElement.querySelector(".tab-group-label");
+                existingFolderElement.querySelector(".zen-folder-label");
               if (folderLabelElement) {
                 folderLabelElement.setAttribute("aria-expanded", "true");
               }
             }
             for (const tab of tabsForThisTopic) {
-              const folderParent = tab.closest("zen-folder");
-              const isInFolderInCorrectWorkspace = folderParent
-                ? folderParent.matches(folderSelector)
-                : false;
-              if (tab && tab.isConnected && !isInFolderInCorrectWorkspace) {
+              if (tab && tab.isConnected && (!tab.group || !tab.group.isZenFolder)) {
                 existingFolderElement.addTabs([tab]);
               } else {
                 console.warn(
                   ` -> Tab "${
                     getTabTitle(tab) || "Unknown"
-                  }" skipped moving to "${topic}" (already folderized or invalid).`
+                  }" skipped moving to "${topic}" (already in a folder or invalid).`
                 );
               }
             }
@@ -1058,7 +1056,9 @@
             const firstValidTabForFolder = tabsForThisTopic[0];
             const folderOptions = {
               label: topic,
+              workspaceId: currentWorkspaceId,
               insertBefore: firstValidTabForFolder,
+              renameFolder: false
             };
             try {
               if (typeof window.gZenFolders !== "undefined") {
@@ -1473,8 +1473,8 @@
     };
   }
 
-  // --- Patch Clear Button to Preserve Tab-Groups ---
-  function patchClearButtonToPreserveGroups() {
+  // --- Patch Clear Button to Preserve Folders ---
+  function patchClearButtonToPreserveFolders() {
     if (typeof window.gZenWorkspaces === "undefined") {
       console.warn("[TidyTabs] gZenWorkspaces not available, cannot patch clear button");
       return;
@@ -1521,8 +1521,8 @@
             return false;
           }
           
-          // Don't close tabs that are in a folder
-          if (tab.closest("zen-folder")) {
+          // Don't close tabs that are in an official Zen folder
+          if (tab.group && tab.group.isZenFolder) {
             return false;
           }
           
@@ -1767,7 +1767,7 @@
           setupSortCommandAndListener();
           addSortButtonToAllSeparators();
           setupgZenWorkspacesHooks();
-          patchClearButtonToPreserveGroups(); // Patch the clear button
+          patchClearButtonToPreserveFolders(); // Patch the clear button
           updateButtonsVisibilityState();
           addTabEventListeners();
 
