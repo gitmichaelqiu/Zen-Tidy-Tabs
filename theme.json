@@ -14,8 +14,8 @@
         "chrome": "userChrome.css"
     },
     "preferences": "preferences.json",
-    "readme": "https://raw.githubusercontent.com/Vertex-Mods/Zen-Tidy-Tabs/main/README.md",
-    "image": "https://raw.githubusercontent.com/Vertex-Mods/Zen-Tidy-Tabs/main/image.png",
+    "readme": "https://raw.githubusercontent.com/gitmichaelqiu/Zen-Tidy-Tabs/main/README.md",
+    "image": "https://raw.githubusercontent.com/gitmichaelqiu/Zen-Tidy-Tabs/main/image.png",
     "author": "Vertex",
     "version": "1.2.0s",
     "tags": [
