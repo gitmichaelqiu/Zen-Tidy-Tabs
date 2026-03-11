@@ -800,8 +800,9 @@
       }
 
       const currentWorkspaceId = window.gZenWorkspaces?.activeWorkspace;
+      console.log("[TabSort] Starting sort process for workspace:", currentWorkspaceId);
       if (!currentWorkspaceId) {
-        console.error("Cannot get current workspace ID.");
+        console.error("[TabSort] Cannot get current workspace ID.");
         return; // Exit early
       }
 
@@ -848,9 +849,10 @@
       );
       const aiTabTopics = await askAIForMultipleTopics(initialTabsToSort);
       console.log(
-        "[TabSort] Debug - AI returned",
+        "[TabSort] AI returned",
         aiTabTopics.length,
-        "tab-topic pairs"
+        "tab-topic pairs:",
+        aiTabTopics.map(t => ({ title: getTabTitle(t.tab), topic: t.topic }))
       );
       // --- End AI Grouping ---
 
@@ -1012,11 +1014,15 @@
           return true;
         });
 
+        console.log(`[TabSort] Processing topic "${topic}" with ${tabsForThisTopic.length} tabs`);
+
         if (tabsForThisTopic.length === 0) {
+          console.log(`[TabSort] Skipping topic "${topic}" - no valid tabs to move`);
           continue;
         }
 
         const existingFolderElement = existingFolderElementsMap.get(topic);
+        console.log(`[TabSort] Existing folder for "${topic}":`, existingFolderElement ? "Found" : "Not Found");
 
         if (existingFolderElement && existingFolderElement.isConnected) {
           try {
@@ -1064,10 +1070,12 @@
             };
             try {
               if (typeof window.gZenFolders !== "undefined") {
+                console.log(`[TabSort] Calling gZenFolders.createFolder for "${topic}"...`);
                 const newFolder = window.gZenFolders.createFolder(
                   tabsForThisTopic,
                   folderOptions
                 );
+                console.log(`[TabSort] createFolder returned:`, newFolder);
                 if (newFolder && newFolder.isConnected) {
                   existingFolderElementsMap.set(topic, newFolder);
                 } else {
