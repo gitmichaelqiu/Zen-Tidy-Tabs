@@ -1,21 +1,21 @@
 // ==UserScript==
 // @ignorecache
 // @name          Ai tab sort and tab clearer
-// @description    sorts tab and arrange them into tab groups
+// @description    sorts tab and arrange them into folders
 // ==/UserScript==
 
 (() => {
   const CONFIG = {
     SIMILARITY_THRESHOLD: 0.45,
-    GROUP_SIMILARITY_THRESHOLD: 0.65, // Lowered from 0.75 to be more inclusive for existing groups
-    MIN_TABS_FOR_SORT: 6, // This is the ammount of tabs for the button to show, not the ammount of tabs you need in a group
+    GROUP_SIMILARITY_THRESHOLD: 0.65, // Lowered from 0.75 to be more inclusive for existing folders
+    MIN_TABS_FOR_SORT: 6, // This is the ammount of tabs for the button to show, not the ammount of tabs you need in a folder
     DEBOUNCE_DELAY: 250,
     ANIMATION_DURATION: 800,
     MAX_INIT_CHECKS: 50,
     INIT_CHECK_INTERVAL: 100,
     CONSOLIDATION_DISTANCE_THRESHOLD: 2,
     EMBEDDING_BATCH_SIZE: 5,
-    EXISTING_GROUP_BOOST: 0.1, // Boost similarity score for existing groups to prefer them
+    EXISTING_GROUP_BOOST: 0.1, // Boost similarity score for existing folders to prefer them
   };
 
   // --- Globals & State ---
@@ -75,12 +75,12 @@
         tab.getAttribute("zen-workspace-id") === workspaceId;
       if (!isInCorrectWorkspace) return false;
 
-      const groupParent = tab.closest("tab-group");
-      const isInGroup = !!groupParent;
+      const folderParent = tab.closest("zen-folder");
+      const isInFolder = !!folderParent;
 
       return (
         (includePinned || !tab.pinned) &&
-        (includeGrouped || !isInGroup) &&
+        (includeGrouped || !isInFolder) &&
         (includeSelected || !tab.selected) &&
         (includeEmpty || !tab.hasAttribute("zen-empty-tab")) &&
         (includeGlance || !tab.hasAttribute("zen-glance-tab"))
@@ -192,11 +192,11 @@
 
     try {
       return document.querySelector(
-        `tab-group[label="${safeSelectorTopicName}"][zen-workspace-id="${workspaceId}"]`
+        `zen-folder[label="${safeSelectorTopicName}"]:has(tab[zen-workspace-id="${workspaceId}"])`
       );
     } catch (e) {
       console.error(
-        `Error finding group selector for "${sanitizedTopicName}":`,
+        `Error finding folder selector for "${sanitizedTopicName}":`,
         e
       );
       return null;
@@ -369,22 +369,21 @@
     const result = [];
     const ungroupedTabs = [];
 
-    // Get existing groups in current workspace
-    const existingWorkspaceGroups = new Map();
+    const existingWorkspaceFolders = new Map();
     if (currentWorkspaceId) {
-      const groupSelector = `tab-group:has(tab[zen-workspace-id="${currentWorkspaceId}"])`;
-      document.querySelectorAll(groupSelector).forEach((groupEl) => {
-        const label = groupEl.getAttribute("label");
+      const folderSelector = `zen-folder:has(tab[zen-workspace-id="${currentWorkspaceId}"])`;
+      document.querySelectorAll(folderSelector).forEach((folderEl) => {
+        const label = folderEl.getAttribute("label");
         if (label) {
-          // Get tabs in this group to calculate group embedding
-          const groupTabs = Array.from(groupEl.querySelectorAll('tab')).filter(tab => 
+          // Get tabs in this folder to calculate folder embedding
+          const folderTabs = Array.from(folderEl.querySelectorAll('tab')).filter(tab => 
             tab.getAttribute("zen-workspace-id") === currentWorkspaceId
           );
-          if (groupTabs.length > 0) {
-            existingWorkspaceGroups.set(label, {
-              element: groupEl,
-              tabs: groupTabs,
-              tabTitles: groupTabs.map(tab => getTabTitle(tab))
+          if (folderTabs.length > 0) {
+            existingWorkspaceFolders.set(label, {
+              element: folderEl,
+              tabs: folderTabs,
+              tabTitles: folderTabs.map(tab => getTabTitle(tab))
             });
           }
         }
@@ -395,20 +394,20 @@
     const tabTitles = validTabs.map((tab) => getTabTitle(tab));
     const embeddings = await processTabsInBatches(validTabs);
 
-    // Calculate embeddings for existing workspace groups
-    const existingGroupEmbeddings = new Map();
-    for (const [groupName, groupInfo] of existingWorkspaceGroups) {
+    // Calculate embeddings for existing workspace folders
+    const existingFolderEmbeddings = new Map();
+    for (const [folderName, folderInfo] of existingWorkspaceFolders) {
       try {
-        const groupTabEmbeddings = await processTabsInBatches(groupInfo.tabs);
-        const validGroupEmbeddings = groupTabEmbeddings.filter(emb => 
+        const folderTabEmbeddings = await processTabsInBatches(folderInfo.tabs);
+        const validFolderEmbeddings = folderTabEmbeddings.filter(emb => 
           Array.isArray(emb) && emb.length > 0
         );
-        if (validGroupEmbeddings.length > 0) {
-          const avgEmbedding = averageEmbedding(validGroupEmbeddings);
-          existingGroupEmbeddings.set(groupName, avgEmbedding);
+        if (validFolderEmbeddings.length > 0) {
+          const avgEmbedding = averageEmbedding(validFolderEmbeddings);
+          existingFolderEmbeddings.set(folderName, avgEmbedding);
         }
       } catch (e) {
-        console.error(`[TabSort] Error calculating embedding for existing group "${groupName}":`, e);
+        console.error(`[TabSort] Error calculating embedding for existing folder "${folderName}":`, e);
       }
     }
 
@@ -426,31 +425,31 @@
       let bestMatch = null;
       let bestSimilarity = 0;
 
-      // Check against current workspace groups
-      for (const [groupName, groupInfo] of existingWorkspaceGroups) {
-        const groupEmbedding = existingGroupEmbeddings.get(groupName);
-        if (!groupEmbedding) continue;
+      // Check against current workspace folders
+    for (const [folderName, folderInfo] of existingWorkspaceFolders) {
+        const folderEmbedding = existingFolderEmbeddings.get(folderName);
+        if (!folderEmbedding) continue;
 
-        let similarity = cosineSimilarity(tabEmbedding, groupEmbedding);
-        similarity += CONFIG.EXISTING_GROUP_BOOST; // Always boost existing groups
+        let similarity = cosineSimilarity(tabEmbedding, folderEmbedding);
+        similarity += CONFIG.EXISTING_GROUP_BOOST; // Always boost existing folders
 
         if (similarity > CONFIG.GROUP_SIMILARITY_THRESHOLD && similarity > bestSimilarity) {
           bestMatch = { 
-            groupData: { groupName }, 
+            folderData: { folderName }, 
             similarity,
-            isExistingGroup: true
+            isExistingFolder: true
           };
           bestSimilarity = similarity;
         }
       }
 
-      // Additional semantic matching for existing groups using title similarity
+      // Additional semantic matching for existing folders using title similarity
       if (!bestMatch || bestMatch.similarity < 0.8) {
-        for (const [groupName, groupInfo] of existingWorkspaceGroups) {
-          // Check if tab title has semantic similarity to group tabs
-          const titleSimilarities = groupInfo.tabTitles.map(groupTabTitle => {
-            const distance = levenshteinDistance(tabTitle.toLowerCase(), groupTabTitle.toLowerCase());
-            const maxLen = Math.max(tabTitle.length, groupTabTitle.length);
+        for (const [folderName, folderInfo] of existingWorkspaceFolders) {
+          // Check if tab title has semantic similarity to folder tabs
+          const titleSimilarities = folderInfo.tabTitles.map(folderTabTitle => {
+            const distance = levenshteinDistance(tabTitle.toLowerCase(), folderTabTitle.toLowerCase());
+            const maxLen = Math.max(tabTitle.length, folderTabTitle.length);
             return maxLen > 0 ? 1 - (distance / maxLen) : 0;
           });
 
@@ -461,9 +460,9 @@
             const adjustedSimilarity = maxTitleSimilarity * 0.8 + CONFIG.EXISTING_GROUP_BOOST;
             if (adjustedSimilarity > CONFIG.GROUP_SIMILARITY_THRESHOLD && adjustedSimilarity > bestSimilarity) {
               bestMatch = { 
-                groupData: { groupName }, 
+                folderData: { folderName }, 
                 similarity: adjustedSimilarity,
-                isExistingGroup: true,
+                isExistingFolder: true,
                 matchType: 'title'
               };
               bestSimilarity = adjustedSimilarity;
@@ -473,15 +472,15 @@
       }
 
       if (bestMatch) {
-        // Add tab to existing group
-        result.push({ tab, topic: bestMatch.groupData.groupName });
-        console.log(`[TabSort] Matched "${tabTitle}" to existing group "${bestMatch.groupData.groupName}" (similarity: ${bestMatch.similarity.toFixed(3)}, type: ${bestMatch.matchType || 'embedding'})`);
+        // Add tab to existing folder
+        result.push({ tab, topic: bestMatch.folderData.folderName });
+        console.log(`[TabSort] Matched "${tabTitle}" to existing folder "${bestMatch.folderData.folderName}" (similarity: ${bestMatch.similarity.toFixed(3)}, type: ${bestMatch.matchType || 'embedding'})`);
       } else {
         ungroupedTabs.push(tab);
       }
     }
 
-    console.log(`[TabSort] Matched ${result.length} tabs to existing groups, ${ungroupedTabs.length} tabs remain ungrouped`);
+    console.log(`[TabSort] Matched ${result.length} tabs to existing folders, ${ungroupedTabs.length} tabs remain ungrouped`);
 
     // Second pass: cluster remaining ungrouped tabs (only if we have enough)
     if (ungroupedTabs.length > 1) {
@@ -570,8 +569,8 @@
             return keywords;
           }
 
-          // Group naming function
-          async function nameGroupWithSmartTabTopic(titles) {
+          // Folder naming function
+          async function nameFolderWithSmartTabTopic(titles) {
             const keywords = extractKeywords(titles);
             const input = `Topic from keywords: ${keywords.join(
               ", "
@@ -585,7 +584,7 @@
                 taskName: "text2text-generation",
                 modelId: "Mozilla/smart-tab-topic",
                 modelHub: "huggingface",
-                engineId: "group-namer",
+                engineId: "folder-namer",
               });
 
               const aiResult = await engine.run({
@@ -593,7 +592,7 @@
                 options: { max_new_tokens: 8, temperature: 0.7 },
               });
 
-              let name = (aiResult[0]?.generated_text || "Group")
+              let name = (aiResult[0]?.generated_text || "Folder")
                 .split("\n")
                 .map((l) => l.trim())
                 .find((l) => l);
@@ -607,14 +606,14 @@
                 .replace(/^['"`]+|['"`]+$/g, "")
                 .replace(/[.?!,:;]+$/, "")
                 .slice(0, 24);
-              return name || "Group";
+              return name || "Folder";
             } catch (e) {
-              console.error("[TabSort][AI] Error naming group:", e);
-              return "Group";
+              console.error("[TabSort][AI] Error naming folder:", e);
+              return "Folder";
             }
           }
 
-          // Process each new group
+          // Process each new folder
           for (let groupIdx = 0; groupIdx < groups.length; groupIdx++) {
             const group = groups[groupIdx];
             const groupTabs = group.map(
@@ -622,44 +621,44 @@
             );
             const groupTitles = groupTabs.map((tab) => getTabTitle(tab));
 
-            // Check if this new group would be similar to an existing group
-            let shouldCreateNewGroup = true;
-            let targetExistingGroup = null;
+            // Check if this new folder would be similar to an existing folder
+            let shouldCreateNewFolder = true;
+            let targetExistingFolder = null;
 
             if (groupTabs.length >= 2) {
               const groupEmbeddings = group.map((idx) => validEmbeddings[idx]);
               const avgEmbedding = averageEmbedding(groupEmbeddings);
 
-              // Check similarity to existing groups one more time with the averaged embedding
-              for (const [groupName, groupInfo] of existingWorkspaceGroups) {
-                const existingEmbedding = existingGroupEmbeddings.get(groupName);
+              // Check similarity to existing folders one more time with the averaged embedding
+              for (const [folderName, folderInfo] of existingWorkspaceFolders) {
+                const existingEmbedding = existingFolderEmbeddings.get(folderName);
                 if (existingEmbedding) {
                   const similarity = cosineSimilarity(avgEmbedding, existingEmbedding) + CONFIG.EXISTING_GROUP_BOOST;
                   if (similarity > CONFIG.GROUP_SIMILARITY_THRESHOLD * 0.9) { // Slightly lower threshold for group-to-group matching
-                    shouldCreateNewGroup = false;
-                    targetExistingGroup = groupName;
-                    console.log(`[TabSort] Merging new group into existing group "${groupName}" (similarity: ${similarity.toFixed(3)})`);
+                    shouldCreateNewFolder = false;
+                    targetExistingFolder = folderName;
+                    console.log(`[TabSort] Merging new group into existing folder "${folderName}" (similarity: ${similarity.toFixed(3)})`);
                     break;
                   }
                 }
               }
             }
 
-            if (!shouldCreateNewGroup && targetExistingGroup) {
-              // Add all tabs to the existing group
+            if (!shouldCreateNewFolder && targetExistingFolder) {
+              // Add all tabs to the existing folder
               groupTabs.forEach((tab) => {
-                result.push({ tab, topic: targetExistingGroup });
+                result.push({ tab, topic: targetExistingFolder });
               });
             } else {
-              // Create new group
-              const groupName = await nameGroupWithSmartTabTopic(groupTitles);
+              // Create new folder
+              const folderName = await nameFolderWithSmartTabTopic(groupTitles);
 
               // Add to result
               groupTabs.forEach((tab) => {
-                result.push({ tab, topic: groupName });
+                result.push({ tab, topic: folderName });
               });
 
-              console.log(`[TabSort] Created new group "${groupName}" with ${groupTabs.length} tabs`);
+              console.log(`[TabSort] Created new folder "${folderName}" with ${groupTabs.length} tabs`);
             }
           }
         }
@@ -805,14 +804,14 @@
         return; // Exit early
       }
 
-      // --- Step 1: Get ALL Existing Group Names for Context ---
-      const allExistingGroupNames = new Set();
-      const groupSelector = `tab-group:has(tab[zen-workspace-id="${currentWorkspaceId}"])`;
+      // --- Step 1: Get ALL Existing Folder Names for Context ---
+      const allExistingFolderNames = new Set();
+      const folderSelector = `zen-folder:has(tab[zen-workspace-id="${currentWorkspaceId}"])`;
 
-      document.querySelectorAll(groupSelector).forEach((groupEl) => {
-        const label = groupEl.getAttribute("label");
+      document.querySelectorAll(folderSelector).forEach((folderEl) => {
+        const label = folderEl.getAttribute("label");
         if (label) {
-          allExistingGroupNames.add(label);
+          allExistingFolderNames.add(label);
         }
       });
 
@@ -824,11 +823,11 @@
         includeEmpty: false,
         includeGlance: false,
       }).filter((tab) => {
-        const groupParent = tab.closest("tab-group");
-        const isInGroupInCorrectWorkspace = groupParent
-          ? groupParent.matches(groupSelector)
+        const folderParent = tab.closest("zen-folder");
+        const isInFolderInCorrectWorkspace = folderParent
+          ? folderParent.matches(folderSelector)
           : false;
-        return !isInGroupInCorrectWorkspace;
+        return !isInFolderInCorrectWorkspace;
       });
 
       console.log(
@@ -896,15 +895,15 @@
           if (distance <= threshold && distance > 0) {
             let canonicalKey = keyA;
             let mergedKey = keyB;
-            const keyAIsActuallyExisting = allExistingGroupNames.has(keyA);
-            const keyBIsActuallyExisting = allExistingGroupNames.has(keyB);
+            const folderAIsActuallyExisting = allExistingFolderNames.has(keyA);
+            const folderBIsActuallyExisting = allExistingFolderNames.has(keyB);
 
-            if (keyBIsActuallyExisting && !keyAIsActuallyExisting) {
+            if (folderBIsActuallyExisting && !folderAIsActuallyExisting) {
               [canonicalKey, mergedKey] = [keyB, keyA];
-            } else if (keyAIsActuallyExisting && keyBIsActuallyExisting) {
+            } else if (folderAIsActuallyExisting && folderBIsActuallyExisting) {
               if (keyA.length > keyB.length)
                 [canonicalKey, mergedKey] = [keyB, keyA];
-            } else if (!keyAIsActuallyExisting && !keyBIsActuallyExisting) {
+            } else if (!folderAIsActuallyExisting && !folderBIsActuallyExisting) {
               if (keyA.length > keyB.length)
                 [canonicalKey, mergedKey] = [keyB, keyA];
             }
@@ -942,16 +941,16 @@
         (tabs) => tabs.length > 1
       );
       
-      // Count tabs that were successfully matched to existing groups
-      const tabsMatchedToExistingGroups = aiTabTopics.length;
+      // Count tabs that were successfully matched to existing folders
+      const tabsMatchedToExistingFolders = aiTabTopics.length;
       
       // Sorting is successful if:
       // - We created new multi-tab groups, OR
-      // - We matched tabs to existing groups, OR  
+      // - We matched tabs to existing folders, OR  
       // - We only had 1 tab to sort (no failure for single tabs)
       const sortingFailed = 
         multiTabGroups.length === 0 && 
-        tabsMatchedToExistingGroups === 0 && 
+        tabsMatchedToExistingFolders === 0 && 
         initialTabsToSort.length > 1;
 
       console.log(
@@ -989,154 +988,125 @@
         return;
       }
 
-      // --- Get existing group ELEMENTS ---
-      const existingGroupElementsMap = new Map();
-      document.querySelectorAll(groupSelector).forEach((groupEl) => {
-        const label = groupEl.getAttribute("label");
+      // --- Get existing folder ELEMENTS ---
+      const existingFolderElementsMap = new Map();
+      document.querySelectorAll(folderSelector).forEach((folderEl) => {
+        const label = folderEl.getAttribute("label");
         if (label) {
-          existingGroupElementsMap.set(label, groupEl);
+          existingFolderElementsMap.set(label, folderEl);
         }
       });
 
       // --- Process each final, consolidated group ---
       for (const topic in finalGroups) {
         const tabsForThisTopic = finalGroups[topic].filter((t) => {
-          const groupParent = t.closest("tab-group");
-          const isInGroupInCorrectWorkspace = groupParent
-            ? groupParent.matches(groupSelector)
+          const folderParent = t.closest("zen-folder");
+          const isInFolderInCorrectWorkspace = folderParent
+            ? folderParent.matches(folderSelector)
             : false;
-          return t && t.isConnected && !isInGroupInCorrectWorkspace;
+          return t && t.isConnected && !isInFolderInCorrectWorkspace;
         });
 
         if (tabsForThisTopic.length === 0) {
           continue;
         }
 
-        const existingGroupElement = existingGroupElementsMap.get(topic);
+        const existingFolderElement = existingFolderElementsMap.get(topic);
 
-        if (existingGroupElement && existingGroupElement.isConnected) {
+        if (existingFolderElement && existingFolderElement.isConnected) {
           try {
-            if (existingGroupElement.getAttribute("collapsed") === "true") {
-              existingGroupElement.setAttribute("collapsed", "false");
-              const groupLabelElement =
-                existingGroupElement.querySelector(".tab-group-label");
-              if (groupLabelElement) {
-                groupLabelElement.setAttribute("aria-expanded", "true");
+            if (existingFolderElement.getAttribute("collapsed") === "true") {
+              existingFolderElement.setAttribute("collapsed", "false");
+              const folderLabelElement =
+                existingFolderElement.querySelector(".zen-folder-label") || 
+                existingFolderElement.querySelector(".tab-group-label");
+              if (folderLabelElement) {
+                folderLabelElement.setAttribute("aria-expanded", "true");
               }
             }
             for (const tab of tabsForThisTopic) {
-              const groupParent = tab.closest("tab-group");
-              const isInGroupInCorrectWorkspace = groupParent
-                ? groupParent.matches(groupSelector)
+              const folderParent = tab.closest("zen-folder");
+              const isInFolderInCorrectWorkspace = folderParent
+                ? folderParent.matches(folderSelector)
                 : false;
-              if (tab && tab.isConnected && !isInGroupInCorrectWorkspace) {
-                gBrowser.moveTabToExistingGroup(tab, existingGroupElement);
+              if (tab && tab.isConnected && !isInFolderInCorrectWorkspace) {
+                existingFolderElement.addTabs([tab]);
               } else {
                 console.warn(
                   ` -> Tab "${
                     getTabTitle(tab) || "Unknown"
-                  }" skipped moving to "${topic}" (already grouped or invalid).`
+                  }" skipped moving to "${topic}" (already folderized or invalid).`
                 );
               }
             }
           } catch (e) {
             console.error(
-              `Error moving tabs to existing group "${topic}":`,
+              `Error moving tabs to existing folder "${topic}":`,
               e,
-              existingGroupElement
+              existingFolderElement
             );
           }
         } else {
-          if (existingGroupElement && !existingGroupElement.isConnected) {
+          if (existingFolderElement && !existingFolderElement.isConnected) {
             console.warn(
-              ` -> Existing group element for "${topic}" was found in map but is no longer connected to DOM. Will create a new group.`
+              ` -> Existing folder element for "${topic}" was found in map but is no longer connected to DOM. Will create a new folder.`
             );
           }
 
-          // Create group for any topic with tabs
+          // Create folder for any topic with tabs
           if (tabsForThisTopic.length > 0) {
-            const firstValidTabForGroup = tabsForThisTopic[0];
-            const groupOptions = {
+            const firstValidTabForFolder = tabsForThisTopic[0];
+            const folderOptions = {
               label: topic,
-              insertBefore: firstValidTabForGroup,
+              insertBefore: firstValidTabForFolder,
             };
             try {
-              const newGroup = gBrowser.addTabGroup(
-                tabsForThisTopic,
-                groupOptions
-              );
-              if (newGroup && newGroup.isConnected) {
-                existingGroupElementsMap.set(topic, newGroup);
-
-                // Try to set group color to average favicon if advanced-tab-groups is available
-                try {
-                  if (typeof newGroup._useFaviconColor === "function") {
-                    setTimeout(() => newGroup._useFaviconColor(), 500);
+              if (typeof window.gZenFolders !== "undefined") {
+                const newFolder = window.gZenFolders.createFolder(
+                  tabsForThisTopic,
+                  folderOptions
+                );
+                if (newFolder && newFolder.isConnected) {
+                  existingFolderElementsMap.set(topic, newFolder);
+                } else {
+                  console.warn(
+                    ` -> createFolder didn't return a connected element for "${topic}". Attempting fallback find.`
+                  );
+                  const newFolderElFallback = findGroupElement(
+                    topic,
+                    currentWorkspaceId
+                  );
+                  if (newFolderElFallback && newFolderElFallback.isConnected) {
+                    existingFolderElementsMap.set(topic, newFolderElFallback);
+                  } else {
+                    console.error(
+                      ` -> Failed to find the newly created folder element for "${topic}" even with fallback.`
+                    );
                   }
-                } catch (e) {
-                  // Silently ignore if advanced-tab-groups is not installed
                 }
               } else {
-                console.warn(
-                  ` -> addTabGroup didn't return a connected element for "${topic}". Attempting fallback find.`
-                );
-                // Use the CORRECT findGroupElement helper from clear script (needs to be added/updated)
-                const newGroupElFallback = findGroupElement(
-                  topic,
-                  currentWorkspaceId
-                );
-                if (newGroupElFallback && newGroupElFallback.isConnected) {
-                  existingGroupElementsMap.set(topic, newGroupElFallback);
-
-                  // Try to set group color to average favicon if advanced-tab-groups is available
-                  try {
-                    if (
-                      typeof newGroupElFallback._useFaviconColor === "function"
-                    ) {
-                      setTimeout(
-                        () => newGroupElFallback._useFaviconColor(),
-                        500
-                      );
-                    }
-                  } catch (e) {
-                    // Silently ignore if advanced-tab-groups is not installed
-                  }
-                } else {
-                  console.error(
-                    ` -> Failed to find the newly created group element for "${topic}" even with fallback.`
-                  );
-                }
+                console.error("gZenFolders API not available.");
               }
             } catch (e) {
               console.error(
-                `Error calling gBrowser.addTabGroup for topic "${topic}":`,
+                `Error calling gZenFolders.createFolder for topic "${topic}":`,
                 e
               );
-              const groupAfterError = findGroupElement(
+              const folderAfterError = findGroupElement(
                 topic,
                 currentWorkspaceId
               );
-              if (groupAfterError && groupAfterError.isConnected) {
+              if (folderAfterError && folderAfterError.isConnected) {
                 console.warn(
-                  ` -> Group "${topic}" might exist despite error. Found via findGroupElement.`
+                  ` -> Folder "${topic}" might exist despite error. Found via findGroupElement.`
                 );
-                existingGroupElementsMap.set(topic, groupAfterError);
-
-                // Try to set group color to average favicon if advanced-tab-groups is available
-                try {
-                  if (typeof groupAfterError._useFaviconColor === "function") {
-                    setTimeout(() => groupAfterError._useFaviconColor(), 500);
-                  }
-                } catch (e) {
-                  // Silently ignore if advanced-tab-groups is not installed
-                }
+                existingFolderElementsMap.set(topic, folderAfterError);
               } else {
                 console.error(
-                  ` -> Failed to find group "${topic}" after creation error.`
+                  ` -> Failed to find folder "${topic}" after creation error.`
                 );
               }
             }
-          } else {
           }
         }
       } // End loop through final groups
@@ -1151,15 +1121,15 @@
           
           // Separate groups and ungrouped tabs
           // Since we're in the workspace's tabsContainer, all direct children belong to this workspace
-          const groups = [];
+          const folders = [];
           const ungroupedTabs = [];
           const otherElements = []; // For any other elements (like periphery hbox)
           
           for (const child of allChildren) {
             const tagName = child.tagName?.toLowerCase();
-            if (tagName === "tab-group") {
-              // All tab-groups in this container belong to the workspace
-              groups.push(child);
+            if (tagName === "zen-folder") {
+              // All zen-folders in this container belong to the workspace
+              folders.push(child);
             } else if (tagName === "tab") {
               // Check if tab is valid (not empty, not glance)
               if (
@@ -1176,15 +1146,15 @@
             }
           }
           
-          console.log("[TabSort] Reorder - groups:", groups.length, "ungrouped:", ungroupedTabs.length);
+          console.log("[TabSort] Reorder - folders:", folders.length, "ungrouped:", ungroupedTabs.length);
           
-          // Only reorder if we have both groups AND ungrouped tabs
-          if (groups.length > 0 && ungroupedTabs.length > 0) {
-            console.log("[TabSort] Reorder - Moving ungrouped tabs below groups...");
+          // Only reorder if we have both folders AND ungrouped tabs
+          if (folders.length > 0 && ungroupedTabs.length > 0) {
+            console.log("[TabSort] Reorder - Moving ungrouped tabs below folders...");
             
-            // Move each ungrouped tab to after the last group
-            const lastGroup = groups[groups.length - 1];
-            let insertAfterElement = lastGroup;
+            // Move each ungrouped tab to after the last folder
+            const lastFolder = folders[folders.length - 1];
+            let insertAfterElement = lastFolder;
             
             ungroupedTabs.forEach((tab) => {
               if (tab.isConnected && insertAfterElement?.isConnected) {
@@ -1320,7 +1290,7 @@
                             id="sort-button"
                             class="sort-button-with-icon"
                             command="cmd_zenSortTabs"
-                            tooltiptext="Sort Tabs into Groups by Topic (AI)">
+                            tooltiptext="Sort Tabs into Folders by Topic (AI)">
                             <hbox class="toolbarbutton-box" align="center">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 28 28" class="broom-icon">
                                     <g>
@@ -1520,7 +1490,7 @@
 
     // Override the method
     window.gZenWorkspaces.closeAllUnpinnedTabs = function() {
-      console.log("[TidyTabs] Clear button clicked - filtering to preserve tab-groups");
+      console.log("[TidyTabs] Clear button clicked - filtering to preserve folders");
       
       try {
         // Get the ACTIVE workspace ID - this is critical!
@@ -1551,16 +1521,9 @@
             return false;
           }
           
-          // Don't close tabs that are in a group/folder
-          if (tab.group) {
-            // Check if it's a zen-folder
-            if (tab.group.isZenFolder || tab.group.tagName === "zen-folder") {
-              return false;
-            }
-            // Check if it's a regular tab-group (not split-view)
-            if (tab.group.tagName === "tab-group" && !tab.group.hasAttribute("split-view-group")) {
-              return false;
-            }
+          // Don't close tabs that are in a folder
+          if (tab.closest("zen-folder")) {
+            return false;
           }
           
           // Don't close essential tabs
@@ -1606,7 +1569,7 @@
       }
     };
     
-    console.log("[TidyTabs] Successfully patched closeAllUnpinnedTabs to preserve tab-groups");
+    console.log("[TidyTabs] Successfully patched closeAllUnpinnedTabs to preserve folders");
   }
 
   // --- Optimized Helper: Count Tabs for Button Visibility ---
@@ -1639,11 +1602,11 @@
     });
 
     for (const tab of allTabs) {
-      const groupParent = tab.closest("tab-group");
-      const isInGroup = !!groupParent;
+      const folderParent = tab.closest("zen-folder");
+      const isInFolder = !!folderParent;
       const isSelected = tab.selected;
 
-      if (isInGroup) {
+      if (isInFolder) {
         hasGroupedTabs = true;
       } else {
         ungroupedTotal++;
@@ -1687,11 +1650,11 @@
               if (hasGroupedTabs && ungroupedTotal > 0) {
                 tidyButton.setAttribute("tooltiptext", 
                   ungroupedTotal === 1 
-                    ? "Sort Tab into Existing Groups by Topic (AI)"
-                    : "Sort Tabs into Groups by Topic (AI)"
+                    ? "Sort Tab into Existing Folders by Topic (AI)"
+                    : "Sort Tabs into Folders by Topic (AI)"
                 );
               } else {
-                tidyButton.setAttribute("tooltiptext", "Sort Tabs into Groups by Topic (AI)");
+                tidyButton.setAttribute("tooltiptext", "Sort Tabs into Folders by Topic (AI)");
               }
             } else {
               tidyButton.classList.add("hidden-button");
